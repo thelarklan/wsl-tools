@@ -271,8 +271,62 @@ Describe 'Distribution default UID' {
         Get-WslDefaultUidState -RegisteredUserId $Registered -ExpectedUserId 1001 | Should -Be $Expected
     }
 
-    It 'reports no registered UID for a distribution that does not exist' {
-        Get-WslRegisteredUserId -DistributionName 'WslTools-NoSuchDistribution' | Should -BeNullOrEmpty
+    It 'passes a fresh registration whose DefaultUid is still 0' {
+        # What `wsl --install --no-launch` leaves behind: the distribution is
+        # registered, but no launch without a command argument has stamped a UID
+        # from /etc/wsl-distribution.conf yet.
+        $entries = @([pscustomobject] @{ DistributionName = 'Fresh'; DefaultUid = 0 })
+        $registered = Resolve-WslRegisteredUserId -RegistryEntries $entries -DistributionName 'Fresh'
+        $registered | Should -Be 0
+        Get-WslDefaultUidState -RegisteredUserId $registered -ExpectedUserId 1002 | Should -Be 'Unset'
+    }
+
+    It 'reads the UID recorded for the requested distribution' {
+        $entries = @(
+            [pscustomobject] @{ DistributionName = 'Other'; DefaultUid = 1000 }
+            [pscustomobject] @{ DistributionName = 'Target'; DefaultUid = 1002 }
+        )
+        Resolve-WslRegisteredUserId -RegistryEntries $entries -DistributionName 'Target' | Should -Be 1002
+    }
+
+    It 'skips registry entries that carry no distribution name' {
+        $entries = @(
+            [pscustomobject] @{ Unrelated = 'value' }
+            $null
+            [pscustomobject] @{ DistributionName = 'Target'; DefaultUid = 1002 }
+        )
+        Resolve-WslRegisteredUserId -RegistryEntries $entries -DistributionName 'Target' | Should -Be 1002
+    }
+
+    It 'returns null only after locating the distribution with no DefaultUid value' {
+        $entries = @([pscustomobject] @{ DistributionName = 'Target' })
+        Resolve-WslRegisteredUserId -RegistryEntries $entries -DistributionName 'Target' | Should -BeNullOrEmpty
+    }
+
+    It 'throws rather than reporting an unset UID when <Case>' -ForEach @(
+        @{
+            Case = 'the distribution is absent'
+            Entries = @([pscustomobject] @{ DistributionName = 'Other'; DefaultUid = 1000 })
+            Expected = '*was not found*'
+        }
+        @{
+            Case = 'no registry entries could be read'
+            Entries = @()
+            Expected = '*was not found*'
+        }
+        @{
+            Case = 'the recorded value is not numeric'
+            Entries = @([pscustomobject] @{ DistributionName = 'Target'; DefaultUid = 'corrupt' })
+            Expected = '*non-numeric*'
+        }
+    ) {
+        { Resolve-WslRegisteredUserId -RegistryEntries $Entries -DistributionName 'Target' } |
+            Should -Throw $Expected
+    }
+
+    It 'fails the registry lookup for a distribution that does not exist' {
+        { Get-WslRegisteredUserId -DistributionName 'WslTools-NoSuchDistribution' } |
+            Should -Throw '*was not found*'
     }
 
     It 'provisioning writes the distribution conf with the allocated UID' {

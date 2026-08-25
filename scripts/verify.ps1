@@ -63,15 +63,24 @@ if ($PSBoundParameters.ContainsKey('ExpectedUserId')) {
     # The registry DefaultUid outranks [user] default in /etc/wsl.conf, and every
     # check above runs `wsl.exe ... -- bash -lc`, which resolves the user through
     # /etc/wsl.conf and never exercises the bare-launch path a user takes.
-    $registeredUserId = Get-WslRegisteredUserId -DistributionName $DistributionName
-    switch (Get-WslDefaultUidState -RegisteredUserId $registeredUserId -ExpectedUserId $ExpectedUserId) {
+    # A registry that cannot be read is not evidence of a correct one, so an
+    # access failure fails the check instead of passing as an absent value.
+    try {
+        $registeredUserId = Get-WslRegisteredUserId -DistributionName $DistributionName
+        $registeredUserIdState = Get-WslDefaultUidState -RegisteredUserId $registeredUserId -ExpectedUserId $ExpectedUserId
+    } catch {
+        Write-Host "[FAIL] Registered default UID ($($_.Exception.Message))" -ForegroundColor Red
+        $failures.Add('Registered default UID')
+        $registeredUserIdState = $null
+    }
+    switch ($registeredUserIdState) {
         'Mismatch' {
             Write-Host "[FAIL] Registered default UID (registry DefaultUid is $registeredUserId, expected $ExpectedUserId)" -ForegroundColor Red
             Write-Host "       Repair it with: wsl --manage $DistributionName --set-default-user $ExpectedUser" -ForegroundColor Yellow
             $failures.Add('Registered default UID')
         }
         'Unset' { Write-Host '[PASS] Registered default UID (not stamped; /etc/wsl.conf governs)' -ForegroundColor Green }
-        default { Write-Host '[PASS] Registered default UID' -ForegroundColor Green }
+        'Match' { Write-Host '[PASS] Registered default UID' -ForegroundColor Green }
     }
 }
 Test-InDistro 'Passwordless sudo' 'sudo -n true'
