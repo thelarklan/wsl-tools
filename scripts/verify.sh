@@ -21,6 +21,8 @@ warn_check() {
 
 tool_exists() { command -v "$1" >/dev/null; }
 rootless_podman_works() { podman info >/dev/null; }
+oobe_disabled() { [[ ! -f /etc/wsl-distribution.conf ]] || ! grep -Eq '^[[:space:]]*command[[:space:]]*=' /etc/wsl-distribution.conf; }
+default_uid_matches() { grep -Eq "^[[:space:]]*defaultUid[[:space:]]*=[[:space:]]*$(id -u)[[:space:]]*$" /etc/wsl-distribution.conf; }
 all_packages_installed() {
     local packages=()
     mapfile -t packages < <(sed 's/#.*$//; /^[[:space:]]*$/d' "${repo_root}/packages.txt")
@@ -39,5 +41,7 @@ for tool in git gh git-lfs gcc fzf python3 podman; do
     check "${tool} is installed" tool_exists "${tool}"
 done
 check 'Rootless Podman works' rootless_podman_works
+check 'First-launch OOBE disabled' oobe_disabled
+check 'Distribution default UID matches this user' default_uid_matches
 check 'Projects directory exists' test -d "${HOME}/projects"
 echo 'All Linux-side checks passed.'

@@ -1,6 +1,76 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# WSL runs the stock image's OOBE wizard on the first launch that starts an
+# interactive shell, and stamps `[oobe] defaultUid` into the distribution's
+# registry entry. That registry value outranks `[user] default` in
+# /etc/wsl.conf, so a stock `defaultUid=1000` drops the user into a root shell
+# whenever provisioning allocated any other UID. Rewrite the file so the
+# wizard never runs and the recorded UID is the one we actually created.
+write_distribution_conf() {
+    local path="$1"
+    local uid="$2"
+
+    if [[ ! ${uid} =~ ^[0-9]+$ ]]; then
+        echo "invalid default UID: ${uid}" >&2
+        return 1
+    fi
+
+    local line trimmed key
+    local -a output=()
+    local in_oobe=0 wrote_uid=0
+
+    if [[ -f ${path} ]]; then
+        while IFS= read -r line || [[ -n ${line} ]]; do
+            trimmed="${line#"${line%%[![:space:]]*}"}"
+            if [[ ${trimmed} =~ ^\[[[:space:]]*([A-Za-z0-9_-]+)[[:space:]]*\] ]]; then
+                if ((in_oobe)) && ((!wrote_uid)); then
+                    output+=("defaultUid=${uid}")
+                    wrote_uid=1
+                fi
+                in_oobe=0
+                [[ ${BASH_REMATCH[1]} == oobe ]] && in_oobe=1
+                output+=("${line}")
+                continue
+            fi
+            if ((in_oobe)); then
+                key="${trimmed%%=*}"
+                key="${key%"${key##*[![:space:]]}"}"
+                case "${key}" in
+                    command)
+                        continue
+                        ;;
+                    defaultUid)
+                        output+=("defaultUid=${uid}")
+                        wrote_uid=1
+                        continue
+                        ;;
+                esac
+            fi
+            output+=("${line}")
+        done < "${path}"
+        if ((in_oobe)) && ((!wrote_uid)); then
+            output+=("defaultUid=${uid}")
+            wrote_uid=1
+        fi
+    fi
+
+    if ((!wrote_uid)); then
+        ((${#output[@]})) && output+=('')
+        output+=('[oobe]' "defaultUid=${uid}")
+    fi
+
+    printf '%s\n' "${output[@]}" > "${path}"
+}
+
+# Exposed so the rewrite can be executed directly by tests.
+if [[ ${1:-} == --write-distribution-conf ]]; then
+    write_distribution_conf \
+        "${2:?usage: provision.sh --write-distribution-conf PATH UID}" \
+        "${3:?usage: provision.sh --write-distribution-conf PATH UID}"
+    exit 0
+fi
+
 user_name="${1:?usage: provision.sh USER HOSTNAME USER_ID [PACKAGE ...]}"
 host_name="${2:?usage: provision.sh USER HOSTNAME USER_ID [PACKAGE ...]}"
 user_id="${3:?usage: provision.sh USER HOSTNAME USER_ID [PACKAGE ...]}"
@@ -83,6 +153,8 @@ enabled=true
 [time]
 useWindowsTimezone=true
 EOF
+
+write_distribution_conf /etc/wsl-distribution.conf "${user_id}"
 
 if ((${#packages[@]})); then
     export DEBIAN_FRONTEND=noninteractive

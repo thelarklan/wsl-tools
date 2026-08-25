@@ -57,6 +57,23 @@ Test-InDistro 'Default user' "test `$(id -un) = '$ExpectedUser'"
 if ($PSBoundParameters.ContainsKey('ExpectedUserId')) {
     Test-InDistro 'Unique Linux user ID' "test `$(id -u) = '$ExpectedUserId'"
 }
+Test-InDistro 'First-launch OOBE disabled' 'test ! -f /etc/wsl-distribution.conf || ! grep -Eq "^[[:space:]]*command[[:space:]]*=" /etc/wsl-distribution.conf'
+if ($PSBoundParameters.ContainsKey('ExpectedUserId')) {
+    Test-InDistro 'Distribution default UID' "grep -Eq '^[[:space:]]*defaultUid[[:space:]]*=[[:space:]]*$ExpectedUserId[[:space:]]*`$' /etc/wsl-distribution.conf"
+    # The registry DefaultUid outranks [user] default in /etc/wsl.conf, and every
+    # check above runs `wsl.exe ... -- bash -lc`, which resolves the user through
+    # /etc/wsl.conf and never exercises the bare-launch path a user takes.
+    $registeredUserId = Get-WslRegisteredUserId -DistributionName $DistributionName
+    switch (Get-WslDefaultUidState -RegisteredUserId $registeredUserId -ExpectedUserId $ExpectedUserId) {
+        'Mismatch' {
+            Write-Host "[FAIL] Registered default UID (registry DefaultUid is $registeredUserId, expected $ExpectedUserId)" -ForegroundColor Red
+            Write-Host "       Repair it with: wsl --manage $DistributionName --set-default-user $ExpectedUser" -ForegroundColor Yellow
+            $failures.Add('Registered default UID')
+        }
+        'Unset' { Write-Host '[PASS] Registered default UID (unset; /etc/wsl.conf governs)' -ForegroundColor Green }
+        default { Write-Host '[PASS] Registered default UID' -ForegroundColor Green }
+    }
+}
 Test-InDistro 'Passwordless sudo' 'sudo -n true'
 Test-InDistro 'Baseline packages installed' "dpkg-query -W $quotedPackages >/dev/null"
 Test-InDistro 'Rootless Podman works' 'podman info >/dev/null'

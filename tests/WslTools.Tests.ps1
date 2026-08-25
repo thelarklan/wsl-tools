@@ -1,3 +1,21 @@
+# Resolved during discovery so Bash-backed cases can be skipped on hosts without
+# a Bash that understands Windows paths. The `bash` on PATH is usually the WSL
+# shim, which cannot open C:\ paths, so Git for Windows is preferred.
+function Get-TestBashPath {
+    $candidates = @(
+        (Join-Path $env:ProgramFiles 'Git\bin\bash.exe')
+        (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Git\bin\bash.exe')
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+    }
+    foreach ($command in @(Get-Command bash -All -ErrorAction SilentlyContinue)) {
+        if ($command.Source -and $command.Source -notmatch 'WindowsApps|System32') { return $command.Source }
+    }
+    return $null
+}
+$script:TestBashPath = Get-TestBashPath
+
 BeforeAll {
     Import-Module "$PSScriptRoot/../scripts/WslTools.psm1" -Force
     $config = Import-PowerShellDataFile "$PSScriptRoot/../config.psd1"
@@ -170,6 +188,98 @@ Describe 'WSL installation command construction' {
         $provisionScript = Get-Content "$PSScriptRoot/../scripts/provision.sh" -Raw
         $provisionScript | Should -Match 'useradd --uid "\$\{user_id\}"'
         $provisionScript | Should -Match 'refusing automatic UID migration'
+    }
+}
+
+Describe 'Distribution default UID' {
+    BeforeAll {
+        $bashPath = @(
+            (Join-Path $env:ProgramFiles 'Git\bin\bash.exe')
+            (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Git\bin\bash.exe')
+        ) + @(
+            @(Get-Command bash -All -ErrorAction SilentlyContinue) |
+                Where-Object { $_.Source -and $_.Source -notmatch 'WindowsApps|System32' } |
+                ForEach-Object { $_.Source }
+        ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+        $provisionPath = (Resolve-Path "$PSScriptRoot/../scripts/provision.sh").Path
+        $stockConf = @(
+            '[oobe]'
+            'command = /usr/lib/wsl/wsl-setup'
+            'defaultUid = 1000'
+            'defaultName = Ubuntu-26.04'
+            ''
+            '[shortcut]'
+            'enabled = true'
+            ''
+            '[windowsterminal]'
+            'ProfileTemplate = /usr/share/wsl/terminal-profile.json'
+        )
+        function Invoke-DistributionConfRewrite {
+            param([string[]] $Content, [int] $UserId)
+            $path = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+            if ($null -ne $Content) {
+                [IO.File]::WriteAllText($path, (($Content -join "`n") + "`n"))
+            }
+            & $bashPath $provisionPath '--write-distribution-conf' $path $UserId
+            if ($LASTEXITCODE -ne 0) { throw "rewrite failed with exit code $LASTEXITCODE" }
+            $result = @(Get-Content -LiteralPath $path)
+            Remove-Item -LiteralPath $path -Force
+            return $result
+        }
+    }
+
+    It 'records the allocated UID and removes the OOBE command' -Skip:(-not $script:TestBashPath) {
+        $result = Invoke-DistributionConfRewrite -Content $stockConf -UserId 1001
+        $result | Should -Contain 'defaultUid=1001'
+        $result | Should -Not -Contain 'defaultUid = 1000'
+        ($result -join "`n") | Should -Not -Match '(?m)^\s*command\s*='
+    }
+
+    It 'preserves the shortcut and windowsterminal sections' -Skip:(-not $script:TestBashPath) {
+        $result = Invoke-DistributionConfRewrite -Content $stockConf -UserId 1001
+        $result | Should -Contain '[shortcut]'
+        $result | Should -Contain 'enabled = true'
+        $result | Should -Contain '[windowsterminal]'
+        $result | Should -Contain 'ProfileTemplate = /usr/share/wsl/terminal-profile.json'
+    }
+
+    It 'is idempotent when rerun over its own output' -Skip:(-not $script:TestBashPath) {
+        $first = Invoke-DistributionConfRewrite -Content $stockConf -UserId 1001
+        $second = Invoke-DistributionConfRewrite -Content $first -UserId 1001
+        ($second -join "`n") | Should -Be ($first -join "`n")
+    }
+
+    It 'adds an oobe section when the file has none' -Skip:(-not $script:TestBashPath) {
+        $result = Invoke-DistributionConfRewrite -Content @('[shortcut]', 'enabled = true') -UserId 1003
+        $result | Should -Contain '[oobe]'
+        $result | Should -Contain 'defaultUid=1003'
+        $result | Should -Contain '[shortcut]'
+    }
+
+    It 'writes a usable file when none exists' -Skip:(-not $script:TestBashPath) {
+        $result = Invoke-DistributionConfRewrite -Content $null -UserId 1042
+        $result | Should -Contain '[oobe]'
+        $result | Should -Contain 'defaultUid=1042'
+    }
+
+    It 'classifies a registered DefaultUid of <Registered> against 1001 as <Expected>' -ForEach @(
+        @{ Registered = 1001; Expected = 'Match' }
+        @{ Registered = 1000; Expected = 'Mismatch' }
+        @{ Registered = $null; Expected = 'Unset' }
+    ) {
+        Get-WslDefaultUidState -RegisteredUserId $Registered -ExpectedUserId 1001 | Should -Be $Expected
+    }
+
+    It 'reports no registered UID for a distribution that does not exist' {
+        Get-WslRegisteredUserId -DistributionName 'WslTools-NoSuchDistribution' | Should -BeNullOrEmpty
+    }
+
+    It 'provisioning writes the distribution conf with the allocated UID' {
+        $provisionScript = Get-Content "$PSScriptRoot/../scripts/provision.sh" -Raw
+        # Text assertion: the call site runs only as root inside a distribution,
+        # so it cannot be executed here. The rewrite behavior it invokes is
+        # covered by the executed cases above.
+        $provisionScript | Should -Match 'write_distribution_conf /etc/wsl-distribution\.conf "\$\{user_id\}"'
     }
 }
 

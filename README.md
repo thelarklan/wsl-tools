@@ -187,6 +187,19 @@ existing distribution unless `-Resume` or `-VerifyOnly` is explicit.
 UID discovery is read-only across existing distributions. Explicit UID
 collisions and attempts to change an existing user's UID fail closed.
 
+Provisioning disables the stock image's first-launch OOBE wizard and records the
+allocated UID in `/etc/wsl-distribution.conf`. Without that, the wizard runs on
+the first launch that opens an interactive shell and stamps the image's
+`defaultUid=1000` into the distribution's registry entry, which outranks
+`[user] default` in `/etc/wsl.conf` and drops the user into a root shell whenever
+provisioning allocated any other UID. Verification checks the recorded UID and
+the registry value. If a distribution created before this fix already shows the
+mismatch, repair it with:
+
+```powershell
+wsl --manage <distribution> --set-default-user <user>
+```
+
 The project never invokes `wsl --unregister` because that irreversibly deletes a
 distribution. It also never invokes `wsl --set-default`; an existing default is
 left alone. If the machine has never had a distribution, WSL may naturally make

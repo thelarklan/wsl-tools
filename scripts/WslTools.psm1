@@ -257,6 +257,33 @@ function Get-ElevatedBootstrapArguments {
     return @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand)
 }
 
+function Get-WslRegisteredUserId {
+    param([Parameter(Mandatory)][string] $DistributionName)
+
+    $lxssPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss'
+    if (-not (Test-Path -LiteralPath $lxssPath)) { return $null }
+    foreach ($key in @(Get-ChildItem -LiteralPath $lxssPath -ErrorAction SilentlyContinue)) {
+        $properties = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue
+        if (-not $properties) { continue }
+        if (-not $properties.PSObject.Properties['DistributionName']) { continue }
+        if ($properties.DistributionName -ne $DistributionName) { continue }
+        if (-not $properties.PSObject.Properties['DefaultUid']) { return $null }
+        return [int] $properties.DefaultUid
+    }
+    return $null
+}
+
+function Get-WslDefaultUidState {
+    param(
+        [AllowNull()] $RegisteredUserId,
+        [Parameter(Mandatory)][int] $ExpectedUserId
+    )
+
+    if ($null -eq $RegisteredUserId -or [string] $RegisteredUserId -eq '') { return 'Unset' }
+    if ([int] $RegisteredUserId -eq $ExpectedUserId) { return 'Match' }
+    return 'Mismatch'
+}
+
 Export-ModuleMember -Function @(
     'Test-WslDistributionName',
     'Test-LinuxUserName',
@@ -275,5 +302,7 @@ Export-ModuleMember -Function @(
     'Get-WslHostState',
     'Get-WslHostActionArguments',
     'Get-WslBootstrapAction',
-    'Get-ElevatedBootstrapArguments'
+    'Get-ElevatedBootstrapArguments',
+    'Get-WslRegisteredUserId',
+    'Get-WslDefaultUidState'
 )
