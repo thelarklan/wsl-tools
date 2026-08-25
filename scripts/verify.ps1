@@ -70,7 +70,7 @@ if ($PSBoundParameters.ContainsKey('ExpectedUserId')) {
             Write-Host "       Repair it with: wsl --manage $DistributionName --set-default-user $ExpectedUser" -ForegroundColor Yellow
             $failures.Add('Registered default UID')
         }
-        'Unset' { Write-Host '[PASS] Registered default UID (unset; /etc/wsl.conf governs)' -ForegroundColor Green }
+        'Unset' { Write-Host '[PASS] Registered default UID (not stamped; /etc/wsl.conf governs)' -ForegroundColor Green }
         default { Write-Host '[PASS] Registered default UID' -ForegroundColor Green }
     }
 }

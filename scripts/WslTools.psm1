@@ -279,7 +279,12 @@ function Get-WslDefaultUidState {
         [Parameter(Mandatory)][int] $ExpectedUserId
     )
 
-    if ($null -eq $RegisteredUserId -or [string] $RegisteredUserId -eq '') { return 'Unset' }
+    # WSL records 0 when no default user has been stamped for the distribution,
+    # which it also does for a freshly registered distribution whose OOBE has not
+    # run. Observed on a provisioned distribution: registry DefaultUid was 0 while
+    # a bare `wsl -d <name>` launch still resolved the user from /etc/wsl.conf.
+    # Only a nonzero disagreement is the failure #17 describes.
+    if ($null -eq $RegisteredUserId -or [string] $RegisteredUserId -eq '' -or [int] $RegisteredUserId -eq 0) { return 'Unset' }
     if ([int] $RegisteredUserId -eq $ExpectedUserId) { return 'Match' }
     return 'Mismatch'
 }

@@ -266,6 +266,7 @@ Describe 'Distribution default UID' {
         @{ Registered = 1001; Expected = 'Match' }
         @{ Registered = 1000; Expected = 'Mismatch' }
         @{ Registered = $null; Expected = 'Unset' }
+        @{ Registered = 0; Expected = 'Unset' }
     ) {
         Get-WslDefaultUidState -RegisteredUserId $Registered -ExpectedUserId 1001 | Should -Be $Expected
     }
