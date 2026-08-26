@@ -57,9 +57,16 @@ Test-InDistro 'Default user' "test `$(id -un) = '$ExpectedUser'"
 if ($PSBoundParameters.ContainsKey('ExpectedUserId')) {
     Test-InDistro 'Unique Linux user ID' "test `$(id -u) = '$ExpectedUserId'"
 }
-Test-InDistro 'First-launch OOBE disabled' 'test ! -f /etc/wsl-distribution.conf || ! grep -Eq "^[[:space:]]*command[[:space:]]*=" /etc/wsl-distribution.conf'
+# Both checks read only the [oobe] section, so a `command` or `defaultUid` key
+# under another section cannot satisfy or break them. The parser is the same
+# checked-in script verify.sh calls, sent in rather than reimplemented here.
+$oobeSectionScript = ConvertTo-BashLineEndings (Get-Content -Raw (Join-Path $PSScriptRoot 'oobe-section.sh'))
+$oobeSectionBase64 = [Convert]::ToBase64String([Text.UTF8Encoding]::new($false).GetBytes($oobeSectionScript))
+$oobeSection = "printf '%s' '$oobeSectionBase64' | base64 --decode | bash -s -- /etc/wsl-distribution.conf"
+
+Test-InDistro 'First-launch OOBE disabled' "! $oobeSection | grep -Eq '^[[:space:]]*command[[:space:]]*='"
 if ($PSBoundParameters.ContainsKey('ExpectedUserId')) {
-    Test-InDistro 'Distribution default UID' "grep -Eq '^[[:space:]]*defaultUid[[:space:]]*=[[:space:]]*$ExpectedUserId[[:space:]]*`$' /etc/wsl-distribution.conf"
+    Test-InDistro 'Distribution default UID' "$oobeSection | grep -Eq '^[[:space:]]*defaultUid[[:space:]]*=[[:space:]]*$ExpectedUserId[[:space:]]*`$'"
     # The registry DefaultUid outranks [user] default in /etc/wsl.conf, and every
     # check above runs `wsl.exe ... -- bash -lc`, which resolves the user through
     # /etc/wsl.conf and never exercises the bare-launch path a user takes.

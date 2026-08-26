@@ -21,8 +21,9 @@ warn_check() {
 
 tool_exists() { command -v "$1" >/dev/null; }
 rootless_podman_works() { podman info >/dev/null; }
-oobe_disabled() { [[ ! -f /etc/wsl-distribution.conf ]] || ! grep -Eq '^[[:space:]]*command[[:space:]]*=' /etc/wsl-distribution.conf; }
-default_uid_matches() { grep -Eq "^[[:space:]]*defaultUid[[:space:]]*=[[:space:]]*$(id -u)[[:space:]]*$" /etc/wsl-distribution.conf; }
+oobe_section() { bash "${repo_root}/scripts/oobe-section.sh" /etc/wsl-distribution.conf; }
+oobe_disabled() { ! oobe_section | grep -Eq '^[[:space:]]*command[[:space:]]*='; }
+default_uid_matches() { oobe_section | grep -Eq "^[[:space:]]*defaultUid[[:space:]]*=[[:space:]]*$(id -u)[[:space:]]*$"; }
 all_packages_installed() {
     local packages=()
     mapfile -t packages < <(sed 's/#.*$//; /^[[:space:]]*$/d' "${repo_root}/packages.txt")

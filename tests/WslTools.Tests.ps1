@@ -262,6 +262,54 @@ Describe 'Distribution default UID' {
         $result | Should -Contain 'defaultUid=1042'
     }
 
+    It 'reads only the oobe section, ignoring <Case>' -Skip:(-not $script:TestBashPath) -ForEach @(
+        @{
+            Case = 'a defaultUid belonging to another section'
+            # The reviewer's fixture on PR #21: without section scoping this file
+            # satisfies both verifier checks, though WSL never reads that value.
+            Content = @('[shortcut]', 'defaultUid=1002')
+            Expected = @()
+        }
+        @{
+            Case = 'a command key belonging to another section'
+            Content = @('[oobe]', 'defaultUid=1002', '', '[shortcut]', 'command = /usr/lib/wsl/wsl-setup')
+            Expected = @('defaultUid=1002')
+        }
+        @{
+            Case = 'keys that precede any section header'
+            Content = @('defaultUid=1000', '[oobe]', 'defaultUid=1002')
+            Expected = @('defaultUid=1002')
+        }
+    ) {
+        $path = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+        [IO.File]::WriteAllText($path, (($Content -join "`n") + "`n"))
+        $section = @(& $bashPath (Resolve-Path "$PSScriptRoot/../scripts/oobe-section.sh").Path $path |
+            Where-Object { $_.Trim() })
+        Remove-Item -LiteralPath $path -Force
+        $LASTEXITCODE | Should -Be 0
+        @($section) | Should -Be $Expected
+    }
+
+    It 'prints nothing for a configuration file that does not exist' -Skip:(-not $script:TestBashPath) {
+        $missing = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+        $section = @(& $bashPath (Resolve-Path "$PSScriptRoot/../scripts/oobe-section.sh").Path $missing)
+        $LASTEXITCODE | Should -Be 0
+        @($section) | Should -BeNullOrEmpty
+    }
+
+    It 'both verifiers scope their checks through the shared oobe parser' {
+        # Text assertion: these call sites run inside a distribution against
+        # /etc/wsl-distribution.conf, so they cannot be executed here. The parser
+        # they invoke is covered by the executed cases above; this only proves
+        # neither verifier grep goes back to reading the whole file.
+        $verifyPs1 = Get-Content "$PSScriptRoot/../scripts/verify.ps1" -Raw
+        $verifyPs1 | Should -Match 'oobe-section\.sh'
+        $verifyPs1 | Should -Not -Match "grep -Eq '[^']*' /etc/wsl-distribution\.conf"
+        $verifySh = Get-Content "$PSScriptRoot/../scripts/verify.sh" -Raw
+        $verifySh | Should -Match 'scripts/oobe-section\.sh'
+        $verifySh | Should -Not -Match 'grep -Eq "[^"]*" /etc/wsl-distribution\.conf'
+    }
+
     It 'classifies a registered DefaultUid of <Registered> against 1001 as <Expected>' -ForEach @(
         @{ Registered = 1001; Expected = 'Match' }
         @{ Registered = 1000; Expected = 'Mismatch' }
