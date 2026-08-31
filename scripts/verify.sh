@@ -45,4 +45,5 @@ check 'Rootless Podman works' rootless_podman_works
 check 'First-launch OOBE disabled' oobe_disabled
 check 'Distribution default UID matches this user' default_uid_matches
 check 'Projects directory exists' test -d "${HOME}/projects"
+check 'User PATH is normalized in login and non-login shells' bash "${repo_root}/scripts/verify-path.sh"
 echo 'All Linux-side checks passed.'

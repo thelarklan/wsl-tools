@@ -386,6 +386,143 @@ Describe 'Distribution default UID' {
     }
 }
 
+Describe 'Shell PATH provisioning' {
+    BeforeAll {
+        $bashPath = @(
+            (Join-Path $env:ProgramFiles 'Git\bin\bash.exe')
+            (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Git\bin\bash.exe')
+        ) + @(
+            @(Get-Command bash -All -ErrorAction SilentlyContinue) |
+                Where-Object { $_.Source -and $_.Source -notmatch 'WindowsApps|System32' } |
+                ForEach-Object { $_.Source }
+        ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+        $provisionPath = (Resolve-Path "$PSScriptRoot/../scripts/provision.sh").Path
+        $verifyPath = (Resolve-Path "$PSScriptRoot/../scripts/verify-path.sh").Path
+        $pathMarker = '# wsl-tools: normalize PATH for login and non-login Bash shells.'
+        $finalPathMarker = '# wsl-tools: normalize PATH after interactive Bash customizations.'
+    }
+
+    BeforeEach {
+        $homePath = Join-Path $TestDrive 'home with spaces'
+        New-Item -ItemType Directory -Path $homePath -Force | Out-Null
+        [IO.File]::WriteAllText(
+            (Join-Path $homePath '.bashrc'),
+            ((@(
+                'case $- in'
+                '    *i*) ;;'
+                '      *) return;;'
+                'esac'
+                'export PATH="$HOME/.local/bin:$PATH"'
+            ) -join "`n") + "`n")
+        )
+        [IO.File]::WriteAllText(
+            (Join-Path $homePath '.profile'),
+            ((@(
+                'if [ -n "$BASH_VERSION" ]; then',
+                '    . "$HOME/.bashrc"',
+                'fi',
+                'if [ -d "$HOME/.local/bin" ]; then PATH="$HOME/.local/bin:$PATH"; fi',
+                'if [ -d "$HOME/bin" ]; then PATH="$HOME/bin:$PATH"; fi'
+            ) -join "`n") + "`n")
+        )
+        $env:WSL_TOOLS_PROVISION_PATH = $provisionPath
+        $env:WSL_TOOLS_VERIFY_PATH = $verifyPath
+        $posixHome = '/' + $homePath.Substring(0, 1).ToLowerInvariant() + '/' +
+            $homePath.Substring(3).Replace('\', '/')
+        $env:WSL_TOOLS_TEST_HOME = $posixHome
+        $invokeProvisionPath = Join-Path $TestDrive 'invoke-provision.sh'
+        $sourceHelperPath = Join-Path $TestDrive 'source-helper.sh'
+        $invokeVerifyPath = Join-Path $TestDrive 'invoke-verify.sh'
+        [IO.File]::WriteAllText(
+            $invokeProvisionPath,
+            ((@(
+                '#!/usr/bin/env bash',
+                'set -e',
+                'bash "$WSL_TOOLS_PROVISION_PATH" --configure-user-path "$WSL_TOOLS_TEST_HOME"'
+            ) -join "`n") + "`n")
+        )
+        [IO.File]::WriteAllText(
+            $sourceHelperPath,
+            ((@(
+                '#!/usr/bin/env bash',
+                'set -e',
+                '. "$HOME/.config/wsl-tools/path.sh"',
+                'printf ''%s'' "$PATH"'
+            ) -join "`n") + "`n")
+        )
+        [IO.File]::WriteAllText(
+            $invokeVerifyPath,
+            ((@('#!/usr/bin/env bash', 'set -e', 'bash "$WSL_TOOLS_VERIFY_PATH"') -join "`n") + "`n")
+        )
+    }
+
+    AfterEach {
+        Remove-Item Env:WSL_TOOLS_TEST_HOME -ErrorAction SilentlyContinue
+        Remove-Item Env:WSL_TOOLS_PROVISION_PATH -ErrorAction SilentlyContinue
+        Remove-Item Env:WSL_TOOLS_VERIFY_PATH -ErrorAction SilentlyContinue
+    }
+
+    It 'creates both bin directories and installs idempotent hooks around stock profile behavior' -Skip:(-not $script:TestBashPath) {
+        & $bashPath $invokeProvisionPath
+        $LASTEXITCODE | Should -Be 0
+        & $bashPath $invokeProvisionPath
+        $LASTEXITCODE | Should -Be 0
+
+        Test-Path (Join-Path $homePath 'bin') | Should -BeTrue
+        Test-Path (Join-Path $homePath '.local/bin') | Should -BeTrue
+        Test-Path (Join-Path $homePath '.config/wsl-tools/path.sh') | Should -BeTrue
+
+        $bashrc = @(Get-Content (Join-Path $homePath '.bashrc'))
+        $profile = @(Get-Content (Join-Path $homePath '.profile'))
+        @($bashrc | Where-Object { $_ -eq $pathMarker }).Count | Should -Be 1
+        @($bashrc | Where-Object { $_ -eq $finalPathMarker }).Count | Should -Be 1
+        @($profile | Where-Object { $_ -eq $pathMarker }).Count | Should -Be 1
+        [Array]::IndexOf($bashrc, $pathMarker) | Should -BeLessThan ([Array]::IndexOf($bashrc, 'case $- in'))
+        [Array]::IndexOf($bashrc, $finalPathMarker) |
+            Should -BeGreaterThan ([Array]::IndexOf($bashrc, 'export PATH="$HOME/.local/bin:$PATH"'))
+        [Array]::IndexOf($profile, $pathMarker) | Should -BeGreaterThan ([Array]::IndexOf($profile, 'if [ -d "$HOME/bin" ]; then PATH="$HOME/bin:$PATH"; fi'))
+    }
+
+    It 'deduplicates inherited PATH entries without dropping distinct directories' -Skip:(-not $script:TestBashPath) {
+        & $bashPath $invokeProvisionPath
+        $LASTEXITCODE | Should -Be 0
+        $previousHome = $env:HOME
+        $previousPath = $env:PATH
+        try {
+            $env:HOME = $posixHome
+            $env:PATH = "$posixHome/.local/bin:$posixHome/.local/bin:/usr/local/bin::/usr/bin:$posixHome/bin:$posixHome/bin"
+            $normalized = & $bashPath --noprofile --norc $sourceHelperPath
+            $LASTEXITCODE | Should -Be 0
+        } finally {
+            $env:HOME = $previousHome
+            $env:PATH = $previousPath
+        }
+
+        $entries = @($normalized -split ':')
+        @($entries | Where-Object { $_ -eq "$posixHome/bin" }).Count | Should -Be 1
+        @($entries | Where-Object { $_ -eq "$posixHome/.local/bin" }).Count | Should -Be 1
+        $entries | Should -Contain '/usr/local/bin'
+        $entries | Should -Contain '/usr/bin'
+        $entries | Should -Not -Contain ''
+        @($entries | Select-Object -Unique).Count | Should -Be $entries.Count
+    }
+
+    It 'passes login, non-login, repeated-source, and polluted-environment verification' -Skip:(-not $script:TestBashPath) {
+        & $bashPath $invokeProvisionPath
+        $previousHome = $env:HOME
+        $previousPath = $env:PATH
+        try {
+            $env:HOME = $posixHome
+            $env:PATH = "/usr/local/bin:/usr/bin:$posixHome/.local/bin"
+            & $bashPath $invokeVerifyPath
+            $LASTEXITCODE | Should -Be 0
+        } finally {
+            $env:HOME = $previousHome
+            $env:PATH = $previousPath
+        }
+    }
+}
+
 Describe 'Fresh Windows host bootstrap' {
     BeforeAll {
         $completeHelp = '--install --from-file PATH --name NAME --no-launch --vhd-size SIZE'
