@@ -99,6 +99,10 @@ effective settings and resume explicitly:
 Resume preserves an existing user's UID. It never rewrites ownership or
 automatically migrates an existing user to a different UID.
 
+Provisioning creates `~/bin` and `~/.local/bin`, makes both available to login
+and non-login Bash shells, and removes duplicate or empty `PATH` entries while
+preserving the first occurrence of every directory.
+
 Verify an existing environment without reconciling packages or writing state:
 
 ```powershell
@@ -151,12 +155,12 @@ Removing a manifest entry never uninstalls software.
 ## Verification and state
 
 Setup and package synchronization verify the OS, architecture, configured
-identity, complete package manifest, rootless Podman, project directory, and
-hostname, and filesystem maximum. An unavailable systemd user manager is reported as a
-warning because Podman can fall back to `cgroupfs`; it does not make an
-otherwise usable environment fail verification. State capture runs even if a
-required verification check fails, writing an ignored inventory under `state/`
-with exact package and selected tool versions for diagnosis.
+identity, complete package manifest, rootless Podman, project directory, shell
+`PATH`, hostname, and filesystem maximum. An unavailable systemd user manager
+is reported as a warning because Podman can fall back to `cgroupfs`; it does not
+make an otherwise usable environment fail verification. State capture runs even
+if a required verification check fails, writing an ignored inventory under
+`state/` with exact package and selected tool versions for diagnosis.
 
 Before a release, follow the
 [clean-machine acceptance checklist](docs/clean-machine-acceptance.md).

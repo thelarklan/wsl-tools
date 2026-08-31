@@ -94,6 +94,10 @@ Test-InDistro 'Passwordless sudo' 'sudo -n true'
 Test-InDistro 'Baseline packages installed' "dpkg-query -W $quotedPackages >/dev/null"
 Test-InDistro 'Rootless Podman works' 'podman info >/dev/null'
 Test-InDistro 'Projects directory exists' 'test -d "$HOME/projects"'
+$pathVerificationScript = ConvertTo-BashLineEndings (Get-Content -Raw (Join-Path $PSScriptRoot 'verify-path.sh'))
+$pathVerificationBase64 = [Convert]::ToBase64String([Text.UTF8Encoding]::new($false).GetBytes($pathVerificationScript))
+Test-InDistro 'User PATH is normalized in login and non-login shells' `
+    "printf '%s' '$pathVerificationBase64' | base64 --decode | bash -s"
 Test-InDistro 'Configured hostname' "test `$(cat /proc/sys/kernel/hostname) = '$ExpectedHostname'"
 Test-InDistro 'Filesystem maximum honors VHD limit' "test `$(df --output=size -B1 / | tail -1) -le $maximumBytes"
 
