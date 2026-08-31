@@ -76,7 +76,11 @@ $packages = @(Read-WslPackageList (Join-Path $repoRoot 'packages.txt'))
 $installed = @(Get-InstalledDistribution)
 $exists = $installed -contains $DistributionName
 if ($exists -and -not $Resume -and -not $VerifyOnly) {
-    throw "Distribution '$DistributionName' already exists; refusing to overwrite it."
+    throw (Get-WslExistingDistributionMessage `
+        -DistributionName $DistributionName `
+        -UserName $UserName `
+        -Hostname $Hostname `
+        -VhdSize $VhdSize)
 }
 if ($Resume -and -not $exists) { throw "Distribution '$DistributionName' is not installed; there is nothing to resume." }
 if ($VerifyOnly -and -not $exists) { throw "Distribution '$DistributionName' is not installed." }

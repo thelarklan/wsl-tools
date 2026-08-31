@@ -562,6 +562,21 @@ Describe 'Development package manifest' {
 }
 
 Describe 'Verification helpers' {
+    It 'returns a copy-and-run recovery command for a partially provisioned distribution' {
+        $message = Get-WslExistingDistributionMessage `
+            -DistributionName 'Work-Ubuntu' `
+            -UserName 'developer' `
+            -Hostname 'work-ubuntu' `
+            -VhdSize '50GB'
+
+        $message | Should -BeExactly (
+            "Distribution 'Work-Ubuntu' already exists; refusing to overwrite it. " +
+            "If a previous run failed during provisioning, resume it with: " +
+            ".\Start-WslTools.cmd -DistributionName 'Work-Ubuntu' -UserName 'developer' " +
+            "-Hostname 'work-ubuntu' -VhdSize '50GB' -Resume -NonInteractive"
+        )
+    }
+
     It 'converts supported VHD units to bytes' -ForEach @(
         @{ Value = '50GB'; Bytes = 53687091200 }
         @{ Value = '1024MB'; Bytes = 1073741824 }

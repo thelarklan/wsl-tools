@@ -312,6 +312,21 @@ function Get-WslDefaultUidState {
     return 'Mismatch'
 }
 
+function Get-WslExistingDistributionMessage {
+    param(
+        [Parameter(Mandatory)][string] $DistributionName,
+        [Parameter(Mandatory)][string] $UserName,
+        [Parameter(Mandatory)][string] $Hostname,
+        [Parameter(Mandatory)][string] $VhdSize
+    )
+
+    $resumeCommand = ".\Start-WslTools.cmd -DistributionName '$DistributionName' " +
+        "-UserName '$UserName' -Hostname '$Hostname' -VhdSize '$VhdSize' " +
+        '-Resume -NonInteractive'
+    return "Distribution '$DistributionName' already exists; refusing to overwrite it. " +
+        "If a previous run failed during provisioning, resume it with: $resumeCommand"
+}
+
 Export-ModuleMember -Function @(
     'Test-WslDistributionName',
     'Test-LinuxUserName',
@@ -333,5 +348,6 @@ Export-ModuleMember -Function @(
     'Get-ElevatedBootstrapArguments',
     'Resolve-WslRegisteredUserId',
     'Get-WslRegisteredUserId',
-    'Get-WslDefaultUidState'
+    'Get-WslDefaultUidState',
+    'Get-WslExistingDistributionMessage'
 )
