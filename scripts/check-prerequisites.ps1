@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [string] $ConfigPath
+    [string] $ConfigPath,
+    [string] $UbuntuRelease,
+    [string] $DistributionName
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +18,9 @@ $config = Import-PowerShellDataFile $resolvedConfigPath
 if (-not (Test-WslConfiguration $config)) {
     throw "Invalid WSL configuration: $resolvedConfigPath"
 }
+$selectedImage = Resolve-WslImageSelection -Configuration $config -Selection $UbuntuRelease
+if (-not $DistributionName) { $DistributionName = $selectedImage.DistributionName }
+if (-not (Test-WslDistributionName $DistributionName)) { throw 'Invalid distribution name.' }
 
 $architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 if ($architecture -ne 'X64') {
@@ -49,5 +54,5 @@ if (-not (Test-WslInstallHelp $wslHelp)) {
 Write-Host 'WSL prerequisites passed.' -ForegroundColor Green
 Write-Host "  WSL version : $wslVersion"
 Write-Host "  Architecture: AMD64 ($architecture)"
-Write-Host "  Image       : $($config.Images.AMD64.FileName)"
-Write-Host "  Distribution: $($config.DistributionName)"
+Write-Host "  Image       : $($selectedImage.FileName)"
+Write-Host "  Distribution: $DistributionName"

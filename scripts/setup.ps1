@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string] $DistributionName,
+    [string] $UbuntuRelease,
     [string] $UserName,
     [Nullable[int]] $UserId,
     [string] $Hostname,
@@ -46,7 +47,20 @@ function Read-Setting {
 
 if ($Resume -and $VerifyOnly) { throw '-Resume and -VerifyOnly cannot be used together.' }
 if (-not (Test-WslConfiguration $config)) { throw "Invalid WSL configuration: $resolvedConfigPath" }
-if (-not $DistributionName) { $DistributionName = $config.DistributionName }
+
+$imageChoice = $UbuntuRelease
+if (-not $NonInteractive -and -not $Resume -and -not $VerifyOnly -and
+    -not $PSBoundParameters.ContainsKey('UbuntuRelease')) {
+    Write-Host 'Available pinned Ubuntu WSL images:' -ForegroundColor Cyan
+    foreach ($line in @(Get-WslImageMenuLines -Configuration $config)) {
+        Write-Host "  $line"
+    }
+    $imageChoice = Read-Host "Select image by number or release [$($config.UbuntuRelease)]"
+}
+$selectedImage = Resolve-WslImageSelection -Configuration $config -Selection $imageChoice
+$UbuntuRelease = $selectedImage.UbuntuRelease
+
+if (-not $DistributionName) { $DistributionName = $selectedImage.DistributionName }
 if (-not $UserName) { $UserName = $config.DefaultUser }
 if (-not $Hostname) { $Hostname = $config.Hostname }
 if (-not $VhdSize) { $VhdSize = $config.VhdSize }
@@ -72,7 +86,10 @@ if (-not (Test-WslHostName $Hostname)) { throw "Invalid hostname '$Hostname'." }
 if (-not (Test-WslVhdSize $VhdSize)) { throw "Invalid VHD size '$VhdSize'." }
 $packages = @(Read-WslPackageList (Join-Path $repoRoot 'packages.txt'))
 
-& (Join-Path $PSScriptRoot 'check-prerequisites.ps1') -ConfigPath $resolvedConfigPath
+& (Join-Path $PSScriptRoot 'check-prerequisites.ps1') `
+    -ConfigPath $resolvedConfigPath `
+    -UbuntuRelease $UbuntuRelease `
+    -DistributionName $DistributionName
 $installed = @(Get-InstalledDistribution)
 $exists = $installed -contains $DistributionName
 if ($exists -and -not $Resume -and -not $VerifyOnly) {
@@ -140,7 +157,7 @@ if ($null -ne $currentUserId) {
 Write-Host "Linux UID: $resolvedUserId"
 
 if ($VerifyOnly) {
-    & (Join-Path $PSScriptRoot 'verify.ps1') -DistributionName $DistributionName -ExpectedUser $UserName -ExpectedUserId $resolvedUserId -ExpectedHostname $Hostname -ExpectedVhdSize $VhdSize -ConfigPath $resolvedConfigPath
+    & (Join-Path $PSScriptRoot 'verify.ps1') -DistributionName $DistributionName -ExpectedUbuntuRelease $UbuntuRelease -ExpectedUser $UserName -ExpectedUserId $resolvedUserId -ExpectedHostname $Hostname -ExpectedVhdSize $VhdSize -ConfigPath $resolvedConfigPath
     exit 0
 }
 
@@ -148,7 +165,7 @@ if (-not $NonInteractive -and -not $Resume) {
     Write-Host ''
     Write-Host 'Installation plan:' -ForegroundColor Cyan
     Write-Host "  Distribution : $DistributionName"
-    Write-Host '  Image        : Ubuntu 26.04 LTS AMD64'
+    Write-Host "  Image        : $($selectedImage.DisplayName) AMD64"
     Write-Host "  Linux user   : $UserName (locked password, passwordless sudo)"
     Write-Host "  Linux UID    : $resolvedUserId (unique across inspected WSL distributions)"
     Write-Host "  Hostname     : $Hostname"
@@ -161,7 +178,7 @@ if (-not $NonInteractive -and -not $Resume) {
 }
 
 if (-not $exists) {
-    $image = $config.Images.AMD64
+    $image = $selectedImage
     if ($ImagePath) {
         $resolvedImage = (Resolve-Path -LiteralPath $ImagePath).Path
     } else {
@@ -177,7 +194,7 @@ if (-not $exists) {
         if (-not (Test-Path -LiteralPath $resolvedImage)) {
             $partial = "$resolvedImage.part"
             Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
-            Write-Host "Downloading the pinned Ubuntu $($config.UbuntuRelease) WSL image..."
+            Write-Host "Downloading the pinned $($selectedImage.DisplayName) WSL image..."
             try {
                 Invoke-WebRequest -UseBasicParsing -Uri $image.Url -OutFile $partial
                 $partialHash = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -219,7 +236,7 @@ try {
     }
 }
 try {
-    & (Join-Path $PSScriptRoot 'verify.ps1') -DistributionName $DistributionName -ExpectedUser $UserName -ExpectedUserId $resolvedUserId -ExpectedHostname $Hostname -ExpectedVhdSize $VhdSize -ConfigPath $resolvedConfigPath
+    & (Join-Path $PSScriptRoot 'verify.ps1') -DistributionName $DistributionName -ExpectedUbuntuRelease $UbuntuRelease -ExpectedUser $UserName -ExpectedUserId $resolvedUserId -ExpectedHostname $Hostname -ExpectedVhdSize $VhdSize -ConfigPath $resolvedConfigPath
 } finally {
     & (Join-Path $PSScriptRoot 'capture-state.ps1') -DistributionName $DistributionName -ConfigPath $resolvedConfigPath
 }

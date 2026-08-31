@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string] $DistributionName,
+    [string] $ExpectedUbuntuRelease,
     [string] $ExpectedUser,
     [Nullable[int]] $ExpectedUserId,
     [string] $ExpectedHostname,
@@ -15,7 +16,9 @@ if (-not $ConfigPath) { $ConfigPath = Join-Path $repoRoot 'config.psd1' }
 $resolvedConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Import-PowerShellDataFile $resolvedConfigPath
 if (-not (Test-WslConfiguration $config)) { throw "Invalid WSL configuration: $resolvedConfigPath" }
-if (-not $DistributionName) { $DistributionName = $config.DistributionName }
+$selectedImage = Resolve-WslImageSelection -Configuration $config -Selection $ExpectedUbuntuRelease
+$ExpectedUbuntuRelease = $selectedImage.UbuntuRelease
+if (-not $DistributionName) { $DistributionName = $selectedImage.DistributionName }
 if (-not $ExpectedUser) { $ExpectedUser = $config.DefaultUser }
 if (-not $ExpectedHostname) { $ExpectedHostname = $config.Hostname }
 if (-not $ExpectedVhdSize) { $ExpectedVhdSize = $config.VhdSize }
@@ -48,7 +51,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Unable to enumerate WSL distributions.' }
 if ($installed -notcontains $DistributionName) { throw "Distribution '$DistributionName' is not installed." }
 
 Test-InDistro 'Ubuntu distribution' 'grep -qx ID=ubuntu /etc/os-release'
-Test-InDistro 'Ubuntu 26.04 release' 'grep -F VERSION_ID= /etc/os-release | grep -Fq 26.04'
+$releaseCheck = 'source /etc/os-release; test "$VERSION_ID" = ''{0}''' -f $ExpectedUbuntuRelease
+Test-InDistro "Ubuntu $ExpectedUbuntuRelease release" $releaseCheck
 Test-InDistro 'AMD64 architecture' 'test $(uname -m) = x86_64'
 Test-InDistro 'WSL 2 kernel' 'grep -qi microsoft /proc/sys/kernel/osrelease'
 Test-InDistro 'systemd is PID 1' 'test $(cat /proc/1/comm) = systemd'

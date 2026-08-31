@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string] $DistributionName,
+    [string] $UbuntuRelease,
     [string] $ConfigPath,
     [string] $ExpectedUser,
     [string] $ExpectedHostname,
@@ -14,7 +15,9 @@ if (-not $ConfigPath) { $ConfigPath = Join-Path $repoRoot 'config.psd1' }
 $resolvedConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 $config = Import-PowerShellDataFile $resolvedConfigPath
 if (-not (Test-WslConfiguration $config)) { throw "Invalid WSL configuration: $resolvedConfigPath" }
-if (-not $DistributionName) { $DistributionName = $config.DistributionName }
+$selectedImage = Resolve-WslImageSelection -Configuration $config -Selection $UbuntuRelease
+$UbuntuRelease = $selectedImage.UbuntuRelease
+if (-not $DistributionName) { $DistributionName = $selectedImage.DistributionName }
 if (-not $ExpectedUser) { $ExpectedUser = $config.DefaultUser }
 if (-not $ExpectedHostname) { $ExpectedHostname = $config.Hostname }
 if (-not $ExpectedVhdSize) { $ExpectedVhdSize = $config.VhdSize }
@@ -30,7 +33,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Package installation failed.' }
 & wsl.exe --distribution $DistributionName --user root -- apt-get clean
 if ($LASTEXITCODE -ne 0) { throw 'apt-get clean failed.' }
 try {
-    & (Join-Path $PSScriptRoot 'verify.ps1') -DistributionName $DistributionName -ExpectedUser $ExpectedUser -ExpectedHostname $ExpectedHostname -ExpectedVhdSize $ExpectedVhdSize -ConfigPath $resolvedConfigPath
+    & (Join-Path $PSScriptRoot 'verify.ps1') -DistributionName $DistributionName -ExpectedUbuntuRelease $UbuntuRelease -ExpectedUser $ExpectedUser -ExpectedHostname $ExpectedHostname -ExpectedVhdSize $ExpectedVhdSize -ConfigPath $resolvedConfigPath
 } finally {
     & (Join-Path $PSScriptRoot 'capture-state.ps1') -DistributionName $DistributionName -ConfigPath $resolvedConfigPath
 }
