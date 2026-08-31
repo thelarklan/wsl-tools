@@ -139,6 +139,17 @@ Describe 'WSL version parsing' {
 }
 
 Describe 'WSL installation command construction' {
+    BeforeAll {
+        $repoRoot = (Resolve-Path "$PSScriptRoot/..").Path
+        $testRootPrefix = (Resolve-Path $PSScriptRoot).Path + [IO.Path]::DirectorySeparatorChar
+        $executableFiles = @(Get-ChildItem $repoRoot -File -Recurse |
+            Where-Object {
+                $_.Extension -in @('.cmd', '.ps1', '.psm1', '.sh') -and
+                -not $_.FullName.StartsWith($testRootPrefix, [StringComparison]::OrdinalIgnoreCase)
+            })
+        $executableSource = @($executableFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
+    }
+
     It 'passes all user values as separate argv entries' {
         $arguments = Get-WslInstallArguments -ImagePath 'C:\images\ubuntu.wsl' -DistributionName 'Work-Ubuntu' -VhdSize '50GB'
         $arguments | Should -Be @(
@@ -165,17 +176,20 @@ Describe 'WSL installation command construction' {
     }
 
     It 'does not automate destructive distribution removal' {
-        $scripts = Get-ChildItem "$PSScriptRoot/.." -File -Recurse |
-            Where-Object { $_.Extension -in @('.cmd', '.ps1', '.psm1') } |
-            Get-Content -Raw
-        ($scripts -join "`n") | Should -Not -Match 'wsl(?:\.exe)?\s+--unregister'
+        # This is intentionally a source assertion: executing every entry point
+        # would itself create or modify a distribution. Match the forbidden
+        # option token independently so argument arrays cannot evade the guard.
+        $executableSource | Should -Not -Match '--unregister(?=(?:\s|[''"]|$))'
     }
 
     It 'does not change the default WSL distribution' {
-        $scripts = Get-ChildItem "$PSScriptRoot/.." -File -Recurse |
-            Where-Object { $_.Extension -in @('.cmd', '.ps1', '.psm1') } |
-            Get-Content -Raw
-        ($scripts -join "`n") | Should -Not -Match 'wsl(?:\.exe)?\s+--set-default(?:\s|$)'
+        # --set-default-user is a supported repair command, so only reject the
+        # exact --set-default option rather than all tokens sharing its prefix.
+        $executableSource | Should -Not -Match '--set-default(?=(?:\s|[''"]|$))'
+    }
+
+    It 'includes Bash entry points in repository safety guards' {
+        @($executableFiles | Where-Object { $_.Extension -eq '.sh' }).Count | Should -BeGreaterThan 0
     }
 
     It 'captures state through the checked-in Bash script' {
