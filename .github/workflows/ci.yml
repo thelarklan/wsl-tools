@@ -64,9 +64,11 @@ jobs:
       - name: Check pinned Canonical image metadata
         shell: pwsh
         run: |
+          Import-Module ./scripts/WslTools.psm1 -Force
           $config = Import-PowerShellDataFile ./config.psd1
-          $sums = Invoke-RestMethod https://releases.ubuntu.com/resolute/SHA256SUMS
-          $expected = "$($config.Images.AMD64.Sha256) *$($config.Images.AMD64.FileName)"
-          if (($sums -split "`n") -notcontains $expected) {
-            throw 'Pinned WSL image does not match Canonical SHA256SUMS.'
+          foreach ($check in @(Get-WslImageMetadataChecks $config)) {
+            $sums = Invoke-RestMethod $check.Sha256SumsUrl
+            if (-not (Test-WslImageMetadataEntry -Sha256Sums $sums -ExpectedLine $check.ExpectedLine)) {
+              throw "Pinned Ubuntu $($check.UbuntuRelease) WSL image does not match Canonical SHA256SUMS."
+            }
           }

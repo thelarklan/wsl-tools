@@ -82,7 +82,10 @@ function ConvertFrom-WslVersionText {
 function Test-WslConfiguration {
     param([Parameter(Mandatory)][hashtable] $Configuration)
 
-    $requiredKeys = @('DistributionName', 'DefaultUser', 'Hostname', 'VhdSize', 'MinimumWsl', 'Images')
+    $requiredKeys = @(
+        'UbuntuRelease', 'DistributionName', 'DefaultUser', 'Hostname',
+        'VhdSize', 'MinimumWsl', 'ImageOrder', 'Images'
+    )
     foreach ($key in $requiredKeys) {
         if (-not $Configuration.ContainsKey($key)) { return $false }
     }
@@ -96,19 +99,116 @@ function Test-WslConfiguration {
     if (-not [version]::TryParse([string] $Configuration.MinimumWsl, [ref] $minimumVersion)) { return $false }
 
     if (-not $Configuration.Images.ContainsKey('AMD64')) { return $false }
-    $image = $Configuration.Images.AMD64
-    if (-not $image) { return $false }
-    foreach ($key in @('FileName', 'Url', 'Sha256')) {
-        if (-not $image.ContainsKey($key)) { return $false }
-    }
-    if ($image.FileName -notmatch '^ubuntu-[0-9.]+-wsl-amd64\.wsl\z') { return $false }
-    if ($image.Sha256 -notmatch '^[a-f0-9]{64}\z') { return $false }
+    $images = $Configuration.Images.AMD64
+    $imageOrder = @($Configuration.ImageOrder)
+    if (-not $images -or -not $imageOrder.Count) { return $false }
+    if (@($imageOrder | Select-Object -Unique).Count -ne $imageOrder.Count) { return $false }
+    if (@($images.Keys).Count -ne $imageOrder.Count) { return $false }
+    if ($Configuration.UbuntuRelease -notin $imageOrder) { return $false }
 
-    $imageUri = $null
-    if (-not [uri]::TryCreate([string] $image.Url, [UriKind]::Absolute, [ref] $imageUri)) { return $false }
-    if ($imageUri.Scheme -ne 'https') { return $false }
+    foreach ($release in $imageOrder) {
+        if ($release -notmatch '^[0-9]{2}\.[0-9]{2}\z' -or -not $images.ContainsKey($release)) { return $false }
+        $image = $images[$release]
+        if (-not $image) { return $false }
+        foreach ($key in @('DisplayName', 'DistributionName', 'FileName', 'Url', 'Sha256SumsUrl', 'Sha256')) {
+            if (-not $image.ContainsKey($key)) { return $false }
+        }
+        if ([string]::IsNullOrWhiteSpace([string] $image.DisplayName)) { return $false }
+        if (-not (Test-WslDistributionName $image.DistributionName)) { return $false }
+        if ($image.FileName -notmatch '^ubuntu-[0-9.]+-wsl-amd64\.wsl\z') { return $false }
+        if ($image.Sha256 -notmatch '^[a-f0-9]{64}\z') { return $false }
+
+        $imageUri = $null
+        if (-not [uri]::TryCreate([string] $image.Url, [UriKind]::Absolute, [ref] $imageUri)) { return $false }
+        if ($imageUri.Scheme -ne 'https') { return $false }
+
+        $sumsUri = $null
+        if (-not [uri]::TryCreate([string] $image.Sha256SumsUrl, [UriKind]::Absolute, [ref] $sumsUri)) { return $false }
+        if ($sumsUri.Scheme -ne 'https' -or -not $sumsUri.AbsolutePath.EndsWith('/SHA256SUMS')) { return $false }
+    }
+    if ($Configuration.DistributionName -ne $images[$Configuration.UbuntuRelease].DistributionName) { return $false }
 
     return $true
+}
+
+function Resolve-WslImageSelection {
+    param(
+        [Parameter(Mandatory)][hashtable] $Configuration,
+        [AllowEmptyString()][string] $Selection
+    )
+
+    if (-not (Test-WslConfiguration $Configuration)) {
+        throw 'Cannot select an image from an invalid WSL configuration.'
+    }
+
+    $release = if ([string]::IsNullOrWhiteSpace($Selection)) {
+        [string] $Configuration.UbuntuRelease
+    } else {
+        $numericChoice = 0
+        if ([int]::TryParse($Selection, [ref] $numericChoice)) {
+            if ($numericChoice -lt 1 -or $numericChoice -gt $Configuration.ImageOrder.Count) {
+                throw "Invalid Ubuntu image choice '$Selection'."
+            }
+            [string] $Configuration.ImageOrder[$numericChoice - 1]
+        } else {
+            $Selection
+        }
+    }
+
+    if ($release -notin @($Configuration.ImageOrder)) {
+        throw "Unsupported Ubuntu release '$release'. Choose one of: $($Configuration.ImageOrder -join ', ')."
+    }
+    $image = $Configuration.Images.AMD64[$release]
+    return [pscustomobject] @{
+        UbuntuRelease     = $release
+        DisplayName       = [string] $image.DisplayName
+        DistributionName  = [string] $image.DistributionName
+        FileName           = [string] $image.FileName
+        Url                = [string] $image.Url
+        Sha256             = [string] $image.Sha256
+    }
+}
+
+function Get-WslImageMenuLines {
+    param([Parameter(Mandatory)][hashtable] $Configuration)
+
+    if (-not (Test-WslConfiguration $Configuration)) {
+        throw 'Cannot format images from an invalid WSL configuration.'
+    }
+    $lines = for ($index = 0; $index -lt $Configuration.ImageOrder.Count; $index++) {
+        $release = $Configuration.ImageOrder[$index]
+        $image = $Configuration.Images.AMD64[$release]
+        $defaultMarker = if ($release -eq $Configuration.UbuntuRelease) { ' (default)' } else { '' }
+        '{0}. {1}{2}' -f ($index + 1), $image.DisplayName, $defaultMarker
+    }
+    return @($lines)
+}
+
+function Get-WslImageMetadataChecks {
+    param([Parameter(Mandatory)][hashtable] $Configuration)
+
+    if (-not (Test-WslConfiguration $Configuration)) {
+        throw 'Cannot check image metadata from an invalid WSL configuration.'
+    }
+
+    return @($Configuration.ImageOrder | ForEach-Object {
+        $release = [string] $_
+        $image = $Configuration.Images.AMD64[$release]
+        [pscustomobject] @{
+            UbuntuRelease  = $release
+            Sha256SumsUrl  = [string] $image.Sha256SumsUrl
+            ExpectedLine   = "$($image.Sha256) *$($image.FileName)"
+        }
+    })
+}
+
+function Test-WslImageMetadataEntry {
+    param(
+        [AllowEmptyString()][string] $Sha256Sums,
+        [Parameter(Mandatory)][string] $ExpectedLine
+    )
+
+    return @($Sha256Sums -split "`r?`n") -contains $ExpectedLine
 }
 
 function Get-WslInstallArguments {
@@ -337,6 +437,10 @@ Export-ModuleMember -Function @(
     'Test-WslVhdSize',
     'ConvertFrom-WslVersionText',
     'Test-WslConfiguration',
+    'Resolve-WslImageSelection',
+    'Get-WslImageMenuLines',
+    'Get-WslImageMetadataChecks',
+    'Test-WslImageMetadataEntry',
     'Get-WslInstallArguments',
     'Test-WslInstallHelp',
     'Read-WslPackageList',

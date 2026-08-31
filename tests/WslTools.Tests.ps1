@@ -27,7 +27,14 @@ Describe 'Public configuration' {
         $config.DefaultUser | Should -Be 'developer'
         $config.Hostname | Should -Be 'ubuntu-dev'
         $config.VhdSize | Should -Be '50GB'
-        $config.Images.AMD64.FileName | Should -Be 'ubuntu-26.04-wsl-amd64.wsl'
+        $config.UbuntuRelease | Should -Be '26.04'
+        $config.ImageOrder | Should -Be @('26.04', '24.04')
+        $config.Images.AMD64['26.04'].FileName | Should -Be 'ubuntu-26.04-wsl-amd64.wsl'
+        $config.Images.AMD64['26.04'].Sha256SumsUrl | Should -Be 'https://releases.ubuntu.com/resolute/SHA256SUMS'
+        $config.Images.AMD64['26.04'].Sha256 | Should -Be '96c7f5fb28a7fe28245331f9bfbe4375f18dd29a4850116ad3c4f60f6700c55c'
+        $config.Images.AMD64['24.04'].FileName | Should -Be 'ubuntu-24.04.4-wsl-amd64.wsl'
+        $config.Images.AMD64['24.04'].Sha256SumsUrl | Should -Be 'https://releases.ubuntu.com/noble/SHA256SUMS'
+        $config.Images.AMD64['24.04'].Sha256 | Should -Be '9b2f7730dc68227dd04a9f3e5eab86ad85caf556b8606ad94f1f29ff5c4fd3f5'
     }
 
     It 'accepts the repository configuration' {
@@ -37,8 +44,53 @@ Describe 'Public configuration' {
     It 'rejects an invalid pinned hash' {
         $invalid = @{} + $config
         $invalid.Images = @{ AMD64 = @{} + $config.Images.AMD64 }
-        $invalid.Images.AMD64.Sha256 = 'not-a-hash'
+        $invalid.Images.AMD64['26.04'] = @{} + $config.Images.AMD64['26.04']
+        $invalid.Images.AMD64['26.04'].Sha256 = 'not-a-hash'
         Test-WslConfiguration $invalid | Should -BeFalse
+    }
+
+    It 'builds and executes a metadata check for every pinned release' {
+        $checks = @(Get-WslImageMetadataChecks $config)
+        $checks.UbuntuRelease | Should -Be @('26.04', '24.04')
+        $checks.Sha256SumsUrl | Should -Be @(
+            'https://releases.ubuntu.com/resolute/SHA256SUMS'
+            'https://releases.ubuntu.com/noble/SHA256SUMS'
+        )
+
+        foreach ($check in $checks) {
+            $sums = "unrelated`n$($check.ExpectedLine)`n"
+            Test-WslImageMetadataEntry -Sha256Sums $sums -ExpectedLine $check.ExpectedLine |
+                Should -BeTrue
+            Test-WslImageMetadataEntry -Sha256Sums 'unrelated' -ExpectedLine $check.ExpectedLine |
+                Should -BeFalse
+        }
+    }
+
+    It 'lists every pinned image with the default first' {
+        Get-WslImageMenuLines $config | Should -Be @(
+            '1. Ubuntu 26.04 LTS (default)'
+            '2. Ubuntu 24.04.4 LTS'
+        )
+    }
+
+    It 'selects the configured default image for an empty choice' {
+        $selection = Resolve-WslImageSelection -Configuration $config -Selection ''
+        $selection.UbuntuRelease | Should -Be '26.04'
+        $selection.DistributionName | Should -Be 'UbuntuDev-26.04'
+    }
+
+    It 'selects an image by menu number or release' -ForEach @(
+        @{ Choice = '2'; Release = '24.04'; Distribution = 'UbuntuDev-24.04' }
+        @{ Choice = '24.04'; Release = '24.04'; Distribution = 'UbuntuDev-24.04' }
+    ) {
+        $selection = Resolve-WslImageSelection -Configuration $config -Selection $Choice
+        $selection.UbuntuRelease | Should -Be $Release
+        $selection.DistributionName | Should -Be $Distribution
+    }
+
+    It 'rejects an unsupported image choice' -ForEach @('3', '22.04') {
+        { Resolve-WslImageSelection -Configuration $config -Selection $_ } |
+            Should -Throw '*Ubuntu*'
     }
 }
 

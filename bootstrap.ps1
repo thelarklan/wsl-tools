@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string] $DistributionName,
+    [string] $UbuntuRelease,
     [string] $UserName,
     [Nullable[int]] $UserId,
     [string] $Hostname,
@@ -147,7 +148,7 @@ if ($bootstrapAction -in @('Install', 'Update')) {
 
 $setupParameters = @{}
 foreach ($parameterName in @(
-    'DistributionName', 'UserName', 'UserId', 'Hostname', 'VhdSize', 'ConfigPath',
+    'DistributionName', 'UbuntuRelease', 'UserName', 'UserId', 'Hostname', 'VhdSize', 'ConfigPath',
     'ImagePath', 'CacheDirectory', 'NonInteractive', 'Resume', 'VerifyOnly'
 )) {
     if ($PSBoundParameters.ContainsKey($parameterName)) {

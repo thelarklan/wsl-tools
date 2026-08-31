@@ -31,7 +31,7 @@ all_packages_installed() {
 }
 
 check 'Ubuntu distribution' grep -qx ID=ubuntu /etc/os-release
-check 'Ubuntu 26.04 release' grep -Fq 26.04 /etc/os-release
+check 'Supported Ubuntu LTS release' grep -Eq '^VERSION_ID="?(24\.04|26\.04)"?$' /etc/os-release
 check 'AMD64 architecture' test "$(uname -m)" = x86_64
 check 'WSL 2 kernel' grep -qi microsoft /proc/sys/kernel/osrelease
 check 'systemd is PID 1' test "$(cat /proc/1/comm)" = systemd

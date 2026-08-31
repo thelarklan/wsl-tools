@@ -69,12 +69,14 @@ Run the launcher without flags for guided setup:
 .\Start-WslTools.cmd
 ```
 
-The CLI prompts for the distribution name, Linux user, hostname, and VHD
-maximum, selects a host-wide unused Linux UID, then shows the plan. The
-root bootstrap accepts the same public parameters as `scripts/setup.ps1`:
+The CLI lists the pinned Ubuntu WSL images first, then prompts for the image,
+distribution name, Linux user, hostname, and VHD maximum. It selects a
+host-wide unused Linux UID, then shows the plan. The root bootstrap accepts the
+same public parameters as `scripts/setup.ps1`:
 
 ```powershell
 .\Start-WslTools.cmd `
+  -UbuntuRelease 24.04 `
   -DistributionName Work-Ubuntu `
   -UserName developer `
   -UserId 1001 `
@@ -83,16 +85,17 @@ root bootstrap accepts the same public parameters as `scripts/setup.ps1`:
   -NonInteractive
 ```
 
-Explicit flags override `config.psd1`. Use `-ImagePath` for an already
-downloaded Canonical image or `-CacheDirectory` to choose the download cache.
-Every image must match the pinned SHA-256.
+Explicit flags override `config.psd1`. `-UbuntuRelease` accepts `24.04` or
+`26.04`; non-interactive runs default to `26.04`. Use `-ImagePath` for an
+already downloaded Canonical image or `-CacheDirectory` to choose the download
+cache. Every image must match the pinned SHA-256 for the selected release.
 
 The setup command refuses to overwrite an existing distribution. If initial
 provisioning was interrupted after the distribution was created, repeat the
 effective settings and resume explicitly:
 
 ```powershell
-.\Start-WslTools.cmd -DistributionName Work-Ubuntu -UserName developer `
+.\Start-WslTools.cmd -UbuntuRelease 24.04 -DistributionName Work-Ubuntu -UserName developer `
   -Hostname work-ubuntu -VhdSize 50GB -Resume -NonInteractive
 ```
 
@@ -102,7 +105,7 @@ automatically migrates an existing user to a different UID.
 Verify an existing environment without reconciling packages or writing state:
 
 ```powershell
-.\Start-WslTools.cmd -DistributionName Work-Ubuntu -UserName developer `
+.\Start-WslTools.cmd -UbuntuRelease 24.04 -DistributionName Work-Ubuntu -UserName developer `
   -Hostname work-ubuntu -VhdSize 50GB -VerifyOnly -NonInteractive
 ```
 
@@ -119,7 +122,7 @@ Verify an existing environment without reconciling packages or writing state:
 - hostname: `ubuntu-dev`
 - maximum VHD size: `50GB`
 - minimum Store WSL: `2.4.10`
-- pinned Ubuntu 26.04 AMD64 WSL image and SHA-256
+- pinned Ubuntu 26.04 and Ubuntu 24.04.4 AMD64 WSL images and SHA-256 checksums
 
 For a read-only check on an already prepared host:
 
@@ -137,7 +140,7 @@ Add missing manifest packages to an existing configured distribution from
 PowerShell:
 
 ```powershell
-.\scripts\sync-packages.ps1 -DistributionName Work-Ubuntu
+.\scripts\sync-packages.ps1 -DistributionName Work-Ubuntu -UbuntuRelease 24.04
 ```
 
 Or run from the repository mounted inside the distribution:
